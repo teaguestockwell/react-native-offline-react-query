@@ -1,12 +1,26 @@
 import React from 'react';
-import {Text, View} from 'react-native';
+import {
+  AppStateStatus,
+  Text,
+  View,
+  Platform,
+  AppState,
+  Button,
+} from 'react-native';
 
+import FlipperAsyncStorage from 'rn-flipper-async-storage-advanced';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 
-import {MutationCache, onlineManager, QueryClient, useQuery} from 'react-query';
+import {
+  MutationCache,
+  onlineManager,
+  QueryClient,
+  focusManager,
+} from 'react-query';
 import {createAsyncStoragePersister} from 'react-query/createAsyncStoragePersister';
 import {PersistQueryClientProvider} from 'react-query/persistQueryClient';
+import {useUserMutation, useUserQuery} from './user-queries';
 
 onlineManager.setEventListener(setOnline => {
   return NetInfo.addEventListener(state => {
@@ -15,11 +29,29 @@ onlineManager.setEventListener(setOnline => {
   });
 });
 
-const queryClient = new QueryClient({
+const useAppState = (onChange: (appState: AppStateStatus) => void) => {
+  React.useEffect(() => {
+    AppState.addEventListener('change', onChange);
+    return () => {
+      AppState.removeEventListener('change', onChange);
+    };
+  }, [onChange]);
+};
+
+const onAppStateChange = (status: AppStateStatus) => {
+  const isWEB = Platform.OS === 'web';
+
+  // React Query already supports in web browser refetch on window focus by default
+  if (!isWEB) {
+    focusManager.setFocused(status === 'active');
+  }
+};
+
+export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       cacheTime: 1000 * 60 * 60 * 24,
-      staleTime: 2000,
+      retry: 0,
     },
   },
   mutationCache: new MutationCache({
@@ -32,37 +64,35 @@ const queryClient = new QueryClient({
   }),
 });
 
+if (process.env.NODE_ENV === 'development') {
+  import('react-query-native-devtools').then(({addPlugin}) => {
+    addPlugin({queryClient});
+  });
+}
+
 const persister = createAsyncStoragePersister({
   storage: AsyncStorage,
   key: 'react-query-offline',
 });
 
 const Root = () => {
-  const [store, setStore] = React.useState<string | null | undefined>();
-  AsyncStorage.getItem('react-query-offline').then(setStore);
-
-  const query = useQuery({
-    queryKey: ['use-mock-users'],
-    queryFn: async () => {
-      console.log('fetching users');
-      const res = await fetch('https://jsonplaceholder.typicode.com/users');
-      const body = await res.json();
-      return body as {
-        id: string;
-        name: string;
-      };
-    },
-  });
+  const query = useUserQuery('1');
+  const mutation = useUserMutation('1');
 
   return (
     <View>
-      <Text>{JSON.stringify(query)}</Text>
-      <Text>{store}</Text>
+      <Button
+        title={'mutate'}
+        disabled={mutation.isLoading}
+        onPress={() => mutation.mutate({id: '1', name: 'test'})}
+      />
+      <Text>{query.status + ' ' + query.data?.name}</Text>
     </View>
   );
 };
 
 const App = () => {
+  useAppState(onAppStateChange);
   return (
     <PersistQueryClientProvider
       client={queryClient}
@@ -75,6 +105,7 @@ const App = () => {
         });
       }}>
       <Root />
+      <FlipperAsyncStorage />
     </PersistQueryClientProvider>
   );
 };
