@@ -38,7 +38,7 @@ export const useUserMutation = (id: string) => {
         ctx?.();
       }
 
-      await qq.invalidateQueries(key);
+      await qq.invalidateQueries(userKeys.all());
     },
   });
 };

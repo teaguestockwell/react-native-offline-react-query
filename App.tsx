@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 
 import FlipperAsyncStorage from 'rn-flipper-async-storage-advanced';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+// import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 
 import {
@@ -18,16 +18,10 @@ import {
   QueryClient,
   focusManager,
 } from 'react-query';
-import {createAsyncStoragePersister} from 'react-query/createAsyncStoragePersister';
 import {PersistQueryClientProvider} from 'react-query/persistQueryClient';
 import {useUserMutation, useUserQuery} from './user-queries';
-
-onlineManager.setEventListener(setOnline => {
-  return NetInfo.addEventListener(state => {
-    const isOnline = state.isConnected === null ? undefined : state.isConnected;
-    setOnline(isOnline);
-  });
-});
+import {MMKVLoader} from 'react-native-mmkv-storage';
+import {PersistedClient, Persister} from 'react-query/persistQueryClient';
 
 const useAppState = (onChange: (appState: AppStateStatus) => void) => {
   React.useEffect(() => {
@@ -70,9 +64,30 @@ if (process.env.NODE_ENV === 'development') {
   });
 }
 
-const persister = createAsyncStoragePersister({
-  storage: AsyncStorage,
-  key: 'react-query-offline',
+const mmkv = new MMKVLoader().withEncryption().initialize();
+
+// const persister = createAsyncStoragePersister({
+//   storage: AsyncStorage,
+//   key: 'react-query-offline',
+// });
+
+const persister: Persister = {
+  persistClient: client => {
+    mmkv.setMap('react-query-client', client);
+  },
+  restoreClient: () => {
+    return mmkv.getMap('react-query-client') as PersistedClient;
+  },
+  removeClient: () => {
+    mmkv.clearStore();
+  },
+};
+
+onlineManager.setEventListener(setOnline => {
+  return NetInfo.addEventListener(state => {
+    const isOnline = state.isConnected === null ? undefined : state.isConnected;
+    setOnline(isOnline);
+  });
 });
 
 const Root = () => {
