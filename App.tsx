@@ -9,7 +9,6 @@ import {
 } from 'react-native';
 
 import FlipperAsyncStorage from 'rn-flipper-async-storage-advanced';
-// import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 
 import {
@@ -18,10 +17,16 @@ import {
   QueryClient,
   focusManager,
 } from 'react-query';
-import {PersistQueryClientProvider} from 'react-query/persistQueryClient';
-import {useUserMutation, useUserQuery} from './user-queries';
+import {
+  PersistQueryClientProvider,
+  PersistedClient,
+  Persister,
+} from 'react-query/persistQueryClient';
+
+// import throttle from 'lodash/throttle';
 import {MMKVLoader} from 'react-native-mmkv-storage';
-import {PersistedClient, Persister} from 'react-query/persistQueryClient';
+
+import {useUserMutation, useUserQuery} from './user-queries';
 
 const useAppState = (onChange: (appState: AppStateStatus) => void) => {
   React.useEffect(() => {
@@ -41,19 +46,23 @@ const onAppStateChange = (status: AppStateStatus) => {
   }
 };
 
+const logger = (...args: any[]) => {
+  console.log(...args);
+};
+
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      cacheTime: 1000 * 60 * 60 * 24,
-      retry: 0,
+      cacheTime: 1000 * 60 * 60 * 48,
+      retry: 2,
     },
   },
   mutationCache: new MutationCache({
-    onSuccess: data => {
-      console.log('onSuccess', data);
+    onSuccess: (data, vars, context, mutation) => {
+      logger('onSuccess', data, vars, context, mutation);
     },
     onError: error => {
-      console.log('onError', error);
+      logger('onError', error);
     },
   }),
 });
@@ -66,17 +75,18 @@ if (process.env.NODE_ENV === 'development') {
 
 const mmkv = new MMKVLoader().withEncryption().initialize();
 
-// const persister = createAsyncStoragePersister({
-//   storage: AsyncStorage,
-//   key: 'react-query-offline',
-// });
-
 const persister: Persister = {
   persistClient: client => {
-    mmkv.setMap('react-query-client', client);
+    mmkv.setString('react-query-client', JSON.stringify(client));
+    logger('dehydrated client', client);
   },
   restoreClient: () => {
-    return mmkv.getMap('react-query-client') as PersistedClient;
+    const res = JSON.parse(
+      mmkv.getString('react-query-client') as string,
+    ) as PersistedClient;
+
+    logger('hydrated client', res);
+    return res;
   },
   removeClient: () => {
     mmkv.clearStore();
@@ -98,7 +108,6 @@ const Root = () => {
     <View>
       <Button
         title={'mutate'}
-        disabled={mutation.isLoading}
         onPress={() => mutation.mutate({id: '1', name: 'test'})}
       />
       <Text>{query.status + ' ' + query.data?.name}</Text>
@@ -113,7 +122,7 @@ const App = () => {
       client={queryClient}
       persistOptions={{persister, buster: '2'}}
       onSuccess={() => {
-        console.log('persist success', Date.now());
+        console.log('client restored');
         // resume mutations after initial restore from localStorage was successful
         queryClient.resumePausedMutations().then(() => {
           queryClient.invalidateQueries();
